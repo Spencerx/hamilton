@@ -1,7 +1,7 @@
 import inspect
 import logging
 from enum import Enum
-from typing import Type, Dict, Any, Callable, List, Tuple, Union
+from typing import Type, Dict, Any, Callable, List, Tuple, Union, Collection
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,8 @@ class Node(object):
                  doc_string: str = '',
                  callabl: Callable = None,
                  node_source: NodeSource = NodeSource.STANDARD,
-                 input_types: Dict[str, Union[Type, Tuple[Type, DependencyType]]] = None):
+                 input_types: Dict[str, Union[Type, Tuple[Type, DependencyType]]] = None,
+                 tags: Collection[str] = None):
         """Constructor for our Node object.
 
         :param name: the name of the function.
@@ -53,6 +54,9 @@ class Node(object):
         :param node_source: whether this is something someone has to pass in.
         :param input_types: the input parameters and their types.
         """
+        if tags is None:
+            tags = set()
+        self._tags = frozenset(tags)
         self._name = name
         self._type = typ
         if typ is None or typ == inspect._empty:
@@ -115,6 +119,10 @@ class Node(object):
     @property
     def depended_on_by(self) -> List['Node']:
         return self._depended_on_by
+
+    @property
+    def tags(self) -> Collection[str]:
+        return self._tags
 
     def __hash__(self):
         return hash(self._name)

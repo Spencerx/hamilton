@@ -8,7 +8,7 @@ import typing_inspect
 import pandas as pd
 
 from hamilton import node
-from hamilton.function_modifiers_base import NodeCreator, NodeResolver, NodeExpander, sanitize_function_name
+from hamilton.function_modifiers_base import NodeCreator, NodeResolver, NodeExpander, sanitize_function_name, NodeDecorator
 from hamilton.models import BaseModel
 
 """
@@ -190,7 +190,6 @@ class extract_columns(NodeExpander):
             output_nodes.append(
                 node.Node(column, pd.Series, doc_string, extractor_fn, input_types={node_.name: pd.DataFrame}))
         return output_nodes
-
 
 
 class extract_fields(NodeExpander):
@@ -401,6 +400,7 @@ class dynamic_transform(NodeCreator):
 
 class model(dynamic_transform):
     """Model, same as a dynamic transform"""
+
     def __init__(self, model_cls, config_param: str, **extra_model_params):
         super(model, self).__init__(transform_cls=model_cls, config_param=config_param, **extra_model_params)
 
@@ -494,3 +494,52 @@ class config(NodeResolver):
             return all(configuration.get(key) not in value for key, value in key_value_group_pairs.items())
 
         return config(resolves)
+
+
+class tag(NodeDecorator):
+    """Decorator class that adds a tag to a node.
+    Tags take the form of strings and can be free-form,
+    although the framework reserves a namespace (E.G. any tag starting with RESERVED_TAG_PREFIX.)
+    """
+    RESERVED_TAG_PREFIX = 'hamilton'
+
+    def __init__(self, *tags: str):
+        self.tags = tags
+
+    def decorate_node(self, node_: node.Node) -> node.Node:
+        """Decorates the nodes produced by this with the specified tags
+
+        :param node_: Node to decorate
+        :return: Copy of the node, with tags assigned
+        """
+        return node.Node(
+            name=node_.name,
+            typ=node_.type,
+            doc_string=node_.documentation,
+            callabl=node_.callable,
+            node_source=node_.node_source,
+            input_types=node_.input_types,
+            tags=self.tags)
+
+    @classmethod
+    def tag_allowed(cls, candidate: str) -> bool:
+        """Whether or not the candidate tag is allowed.
+        Its not allowed if it starts with a certain prefix.
+
+        :param candidate: Tag to check
+        :return: Whether or not its allowed
+        """
+        return not candidate.startswith(tag.RESERVED_TAG_PREFIX + '.')
+
+    def validate(self, fn: Callable):
+        """Validates the decorator. In this case that the set of tags produced is final.
+
+        :param fn: Function that the decorator is called on.
+        :raises ValueError: if the specified tags contains invalid ones
+        """
+        bad_tags = set()
+        for requested_tag in self.tags:
+            if not tag.tag_allowed(requested_tag):
+                bad_tags.add(requested_tag)
+        if bad_tags:
+            raise InvalidDecoratorException(f'The following tags are reserved: {list(bad_tags)}')
