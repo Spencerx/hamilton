@@ -18,7 +18,7 @@ def test_driver_validate_runtime_input_types():
 def test_driver_variables():
     dr = Driver({}, tests.resources.tagging)
     tags = {var.name: list(var.tags) for var in dr.list_available_variables()}
-    assert tags['a'] == ['a']
-    assert tags['b'] == ['b_c']
-    assert tags['c'] == ['b_c']
+    assert tags['a'] == ['test.a']
+    assert tags['b'] == ['test.b_c']
+    assert tags['c'] == ['test.b_c']
     assert tags['d'] == []

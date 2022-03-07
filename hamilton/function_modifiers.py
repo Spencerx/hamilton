@@ -1,15 +1,19 @@
 import functools
-import functools
 import inspect
+import logging
+import re
 import typing
-from typing import Dict, Callable, Collection, Tuple, Union, Any, Type
-import typing_inspect
+from typing import Dict, Callable, Collection, Tuple, Union, Any, Type, List
 
 import pandas as pd
+import typing_inspect
 
 from hamilton import node
 from hamilton.function_modifiers_base import NodeCreator, NodeResolver, NodeExpander, sanitize_function_name, NodeDecorator
 from hamilton.models import BaseModel
+
+logger = logging.getLogger(__file__)
+
 
 """
 Annotations for modifying the way functions get added to the DAG.
@@ -497,11 +501,31 @@ class config(NodeResolver):
 
 
 class tag(NodeDecorator):
-    """Decorator class that adds a tag to a node.
-    Tags take the form of strings and can be free-form,
-    although the framework reserves a namespace (E.G. any tag starting with RESERVED_TAG_PREFIX.)
+    """Decorator class that adds a tag to a node. Tags take the form of (potentially) nested namespaces with values.
+
+    @tag('foo.bar.baz\.foobar')
+    def my_function(...) -> ...:
+       ...
+
+    This means that the nested path `foo.bar` has a key `baz.foobar`.
+
+    The presence of JSON tags enables the user to potentially do more complex queries. That said, the values of the keys
+    are restricted -- they must be valid python variable names. The values can be anything, as long as they escape .s.
+
+    We are still figuring out the querying methodology, so for now we're limiting to this flat representation. We *are*
+    allowing multiple of the same tag. E.G. @tag('foo.bar.baz', 'foo.bar.baz2') -- whether this compiles to {'foo.bar' : ['baz', 'baz2'}
+    or [{'foo' : {'bar' : 'baz'}},{'foo' : {'bar' : 'baz'}}] is a detail we'll figure out later pending querying semantics.
+
+    The framework reserves the right to a certain set of top-level prefixes (E.G. any tag where the top level is RESERVED_TAG_PREFIX).
     """
-    RESERVED_TAG_PREFIX = 'hamilton'
+
+    RESERVED_TAG_PREFIXES = [
+        'hamilton',
+        'data_quality',
+        'gdpr',
+        'ccpa',
+        'dag',
+    ]  # Anything that starts with any of these is banned, the framework reserves the right to manage it
 
     def __init__(self, *tags: str):
         self.tags = tags
@@ -522,6 +546,20 @@ class tag(NodeDecorator):
             tags=self.tags)
 
     @classmethod
+    def _split_tag(cls, tag_string: str) -> Tuple[List[str], str]:
+        """Yields the key components as well as a value for the tag.
+        Does not validate.
+
+        :param tag_string: Tag to process.
+        :raises ValueError: if the tag does not follow the rules above
+        :return: A tuple of [component list (List[str)), value (str)]
+        """
+        all_components = [part.replace('\.', '.') for part in re.split(r'(?<!\\)\.', tag_string)]
+        if len(all_components) < 2:
+            raise ValueError(f'All tags must have at least one key (E.G. a path) and a value. {tag_string} does not.')
+        return all_components[:-1], all_components[-1]
+
+    @classmethod
     def tag_allowed(cls, candidate: str) -> bool:
         """Whether or not the candidate tag is allowed.
         Its not allowed if it starts with a certain prefix.
@@ -529,7 +567,17 @@ class tag(NodeDecorator):
         :param candidate: Tag to check
         :return: Whether or not its allowed
         """
-        return not candidate.startswith(tag.RESERVED_TAG_PREFIX + '.')
+        try:
+            path, end = cls._split_tag(candidate)
+        except ValueError as e:
+            logger.exception(e)
+            return False
+        invalid = [item for item in path if not item.isidentifier()]
+        if invalid:
+            return False
+        if len(path) > 0 and path[0] in cls.RESERVED_TAG_PREFIXES or end in cls.RESERVED_TAG_PREFIXES:
+            return False
+        return True
 
     def validate(self, fn: Callable):
         """Validates the decorator. In this case that the set of tags produced is final.
@@ -542,4 +590,10 @@ class tag(NodeDecorator):
             if not tag.tag_allowed(requested_tag):
                 bad_tags.add(requested_tag)
         if bad_tags:
-            raise InvalidDecoratorException(f'The following tags are reserved: {list(bad_tags)}')
+            raise InvalidDecoratorException('The following tags are invalid as tags: '
+                                            'Tags can be split by ., to represent a hierarchy, '
+                                            'but each element of the hierarchy must be a valid python identifier. '
+                                            'Paths components also cannot be empty. '
+                                            'The last item in the path can be anything. Note that the following top-level prefixes are '
+                                            f'reserved as well: {self.RESERVED_TAG_PREFIXES}'
+                                            f': {list(bad_tags)}')

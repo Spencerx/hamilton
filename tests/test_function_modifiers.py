@@ -491,11 +491,37 @@ def test_tags():
     assert 'bar' in node_.tags
 
 
-def test_tags_invalid_tags():
-    def dummy_tagged_function() -> int:
-        """dummy doc"""
-        return 1
+@pytest.mark.parametrize(
+    'tag',
+    [
+        'hamilton.foo',  # Reserved key
+        'foo',  # No single key allowed
+        'foo@.bar',  # Invalid python variable
+        'foo@.',  # Empty value
+        'foo.bar baz.something',  # No spaces
+        'foo-bar.baz',  # Invalid key
+        '.',  # Empty
+        ' . ',  # No just whitespace
+    ]
+)
+def test_tags_invalid_tags(tag: str):
+    annotation = function_modifiers.tag(tag)
+    assert not annotation.tag_allowed(tag)
 
-    annotation = function_modifiers.tag('hamilton.foo', 'hamilton.bar')
-    with pytest.raises(InvalidDecoratorException):
-        annotation(dummy_tagged_function)
+
+@pytest.mark.parametrize(
+    'tag',
+    [
+        'bar.foo',  # Key/value, simple
+        'bar.foo-bar baz',  # Value can be whatever
+        'bar.baz.foo',  # Nested is OK
+        'email.bar@baz\.com',  # Emails are cool
+        'team.my-team@my-company\.com',  # More emails with special chars
+        'team.:team:my-team:', # Some special chars for team
+        'foo.bar.baz',  # Three deep
+        'hamiltoons.bar.baz.foo@baz\.com'  # Escaped
+    ]
+)
+def test_tags_valid_tags(tag: str):
+    annotation = function_modifiers.tag(tag)
+    assert annotation.tag_allowed(tag)

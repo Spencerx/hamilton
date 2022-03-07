@@ -219,7 +219,7 @@ class NodeTransformer(SubDAGModifier):
         return True
 
 
-class NodeDecorator(NodeTransformer):
+class NodeDecorator(NodeTransformer, abc.ABC):
     DECORATE_NODES = 'decorate_nodes'
 
     def transform_node(self, node_: node.Node, config: Dict[str, Any], fn: Callable) -> Collection[node.Node]:
